@@ -12,21 +12,28 @@ import os.path
 import socket
 import struct
 import string
+import pickle
 from datetime import datetime
+
+import zmq
 
 from FundTools.GeneralCrawlerTool.Base import SingletonRedis
 
 
-class Transport(object):
+class BaseTransfer(object):
+    def __init__(self, ip, port):
+        self.ip = ip
+        self.port = port
+        self.cache = SingletonRedis.getRedisInstance()
+        self.filepathTemp = self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "apiGot", "${filename}"))
+
+class Transfer(BaseTransfer):
     
     BufferSize = 4096
     StructFormat = "9s I"
     
     def __init__(self, ip, port):
-        self.ip = ip
-        self.port = port
-        self.cache = SingletonRedis.getRedisInstance()
-        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "apiGot", "${filename}"))
+        super(Transfer, self).__init__(ip, port)
         self.fileInfoStruct = struct.Struct(self.StructFormat)
     
     def sendFile(self):
@@ -92,3 +99,51 @@ class Transport(object):
 
         sock.close()
         print("[INFO] Complete at {0}".format(datetime.now().strftime("%c")))
+
+
+class TransferWithZMQ(BaseTransfer):
+    def __init__(self, ip, port):
+        super(TransferWithZMQ, self).__init__(ip, port)
+        self.ctx = zmq.Context.instance()
+    
+    def sendFile(self):
+        sock = self.ctx.socket(zmq.REQ)
+        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        fileContent = None
+        while "transportFundCode" in self.cache.keys():
+            fundCode = self.cache.spop("transportFundCode", count=None)
+            if fundCode is None:
+                continue
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
+            if not os.path.exists(filepath):
+                continue
+            sock.send_string("next,{0}".format(fundCode))  # 第一次发送：发送下一个文件的名称
+            if sock.recv_string().lower() == "ok":
+                with open(filepath, 'r', encoding="utf-8") as file:
+                    fileContent = file.read()
+                sock.send_pyobj(pickle.dumps(fileContent))  # 第二次发送：发送文件内容
+                sock.recv_string()
+            else:
+                break
+        sock.send_string("exit,0")  # 通知对端退出
+        sock.close()
+        self.ctx.destroy()
+        
+    
+    def recvFile(self):
+        sock = self.ctx.socket(zmq.REP)
+        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        while True:
+            infoStr = sock.recv_string().lower()
+            info, fundCode = infoStr.split(',')
+            if info == "next":
+                sock.send_string("ok")
+                filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
+                pickledContent = sock.recv_pyobj()
+                with open(filepath, 'w', encoding='utf-8') as file:
+                    file.write(pickle.loads(pickledContent))
+                sock.send_string("ok")
+            else:
+                break
+        sock.close()
+        self.ctx.destroy()
