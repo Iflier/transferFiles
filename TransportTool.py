@@ -46,14 +46,14 @@ class Transfer(BaseTransfer):
         conn, addr = sock.accept()
         print("[INFO] A connection received from: {0}".format(addr))
         
-        if "inuseTransportFundCode" in self.cache.keys():
-            for mem in self.cache.smembers("inuseTransportFundCode"):
-                self.cache.smove("inuseTransportFundCode", "transportFundCode", mem)
+        if "inuseTransferFundCode" in self.cache.keys():
+            for mem in self.cache.smembers("inuseTransferFundCode"):
+                self.cache.smove("inuseTransferFundCode", "transferFundCode", mem)
         
         stratTime = time.time()
-        totalNum = self.cache.scard("transportFundCode")
-        while "transportFundCode" in self.cache.keys():
-            fundCode = self.cache.spop("transportFundCode", count=None)
+        totalNum = self.cache.scard("transferFundCode")
+        while "transferFundCode" in self.cache.keys():
+            fundCode = self.cache.spop("transferFundCode", count=None)
             if fundCode is None:
                 # 没有更多的元素了
                 continue
@@ -61,7 +61,7 @@ class Transfer(BaseTransfer):
             if not os.path.exists(filepath):
                 # 如果指定的文件不存在，则什么也不做
                 continue
-            self.cache.sadd("inuseTransportFundCode", fundCode)
+            self.cache.sadd("inuseTransferFundCode", fundCode)
             fileHeader = self.fileInfoStruct.pack(fundCode, os.path.getsize(filepath))
             conn.send(fileHeader)
             with open(filepath, 'rb') as file:
@@ -70,7 +70,7 @@ class Transfer(BaseTransfer):
                     if not data:
                         break
                     conn.send(data)
-            self.cache.srem("inuseTransportFundCode", fundCode)
+            self.cache.srem("inuseTransferFundCode", fundCode)
         conn.send(self.fileInfoStruct.pack("exit", 0))
         conn.close()
         sock.close()
@@ -102,6 +102,8 @@ class Transfer(BaseTransfer):
 
 
 class TransferWithZMQ(BaseTransfer):
+    """发送一个文件需要对端来回通信2次。也不便于开多线程
+    """
     def __init__(self, ip, port):
         super(TransferWithZMQ, self).__init__(ip, port)
         self.ctx = zmq.Context.instance()
@@ -109,14 +111,14 @@ class TransferWithZMQ(BaseTransfer):
     def sendFile(self):
         sock = self.ctx.socket(zmq.REQ)
         sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
-        fileContent = None
-        while "transportFundCode" in self.cache.keys():
+        while "transferFundCode" in self.cache.keys():
             fundCode = self.cache.spop("transportFundCode", count=None)
             if fundCode is None:
                 continue
             filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
             if not os.path.exists(filepath):
                 continue
+            fileContent = None
             sock.send_string("next,{0}".format(fundCode))  # 第一次发送：发送下一个文件的名称
             if sock.recv_string().lower() == "ok":
                 with open(filepath, 'r', encoding="utf-8") as file:
@@ -132,7 +134,7 @@ class TransferWithZMQ(BaseTransfer):
     
     def recvFile(self):
         sock = self.ctx.socket(zmq.REP)
-        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        sock.connect("tcp://{0}".format(":".join([self.ip, self.port])))
         while True:
             infoStr = sock.recv_string().lower()
             info, fundCode = infoStr.split(',')
@@ -145,5 +147,44 @@ class TransferWithZMQ(BaseTransfer):
                 sock.send_string("ok")
             else:
                 break
+        sock.close()
+        self.ctx.destroy()
+
+class TransferWithZMQPP(BaseTransfer):
+    """消息大小一般为几个KB到几个MB
+    """
+    def __init__(self, ip, port):
+        super(TransferWithZMQPP, self).__init__(ip, port)
+        self.ctx = zmq.Context.instance()
+    
+    def sendFile(self):
+        sock = self.ctx.socket(zmq.PUSH)
+        sock.bind("tcp://{0}".format(":".jion([self.ip, self.port])))
+        while "transferFundCode" in self.cache.keys():
+            fundCode = self.cache.spop("transferFundCode")
+            if fundCode is None:
+                continue
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
+            if not os.path.exists(filepath):
+                continue
+            fileContent = None
+            with open(filepath, 'r', encoding="utf-8") as file:
+                fileContent = file.read()
+            sock.send_string(json.dumps(dict(fundcode=fundCode, content=fileContent), ensure_ascii=False))
+        sock.send_string(json.dumps(dict(fundcode="exit", content=""), ensure_ascii=False))
+        sock.close()
+        self.ctx.destroy()
+    
+    def recvFile(self):
+        sock = self.ctx.socket(zmq.PULL)
+        sock.connect("tcp://{0}".format(":".join([self.ip, self.port])))
+        while True:
+            msg = json.loads(sock.recv_string(), encoding="utf-8")
+            if msg["fundcode"].lower() in ["exit", "quit"]:
+                break
+            else:
+                filepath = self.filepathTemp.substitute(filename=".".join([msg["fundcode"], "json"]))
+                with open(filepath, 'w', encoding='utf-8') as file:
+                    file.write(msg["content"])
         sock.close()
         self.ctx.destroy()
