@@ -3,6 +3,8 @@
 Dec: 文件传送工具
 Created on: 2019.10.14
 Author: Iflier
+Modified on: 2019.10.17
+对 PUSH/PULL 连接绑定对，添加暂存正在使用的fundcode
 """
 import os
 import sys
@@ -102,7 +104,7 @@ class Transfer(BaseTransfer):
 
 
 class TransferWithZMQ(BaseTransfer):
-    """发送一个文件需要对端来回通信2次。也不便于开多线程
+    """发送一个文件需要对端来回通信 2 次。也不便于开多线程
     """
     def __init__(self, ip, port):
         super(TransferWithZMQ, self).__init__(ip, port)
@@ -120,11 +122,13 @@ class TransferWithZMQ(BaseTransfer):
                 continue
             fileContent = None
             sock.send_string("next,{0}".format(fundCode))  # 第一次发送：发送下一个文件的名称
+            self.cache.sadd("inuseTransferFundCode", fundCode)
             if sock.recv_string().lower() == "ok":
                 with open(filepath, 'r', encoding="utf-8") as file:
                     fileContent = file.read()
-                sock.send_pyobj(pickle.dumps(fileContent))  # 第二次发送：发送文件内容
+                sock.send_pyobj(pickle.dumps(fileContent))  # 第二次发送：发送关于下一个文件的内容
                 sock.recv_string()
+                self.cache.srem("inuseTransferFundCode", fundCode)
             else:
                 break
         sock.send_string("exit,0")  # 通知对端退出
@@ -159,7 +163,7 @@ class TransferWithZMQPP(BaseTransfer):
     
     def sendFile(self):
         sock = self.ctx.socket(zmq.PUSH)
-        sock.bind("tcp://{0}".format(":".jion([self.ip, self.port])))
+        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
         while "transferFundCode" in self.cache.keys():
             fundCode = self.cache.spop("transferFundCode")
             if fundCode is None:
@@ -168,9 +172,11 @@ class TransferWithZMQPP(BaseTransfer):
             if not os.path.exists(filepath):
                 continue
             fileContent = None
+            self.cache.sadd("inuseTransferFundCode", fundCode)
             with open(filepath, 'r', encoding="utf-8") as file:
                 fileContent = file.read()
             sock.send_string(json.dumps(dict(fundcode=fundCode, content=fileContent), ensure_ascii=False))
+            self.cache.srem("inuseTransferFundCode", fundCode)
         sock.send_string(json.dumps(dict(fundcode="exit", content=""), ensure_ascii=False))
         sock.close()
         self.ctx.destroy()
