@@ -5,3 +5,5 @@
 ## Update on 2019.10.16
 使用先进的消息队列`ZMQ`在机器之间复制文件  
 所有的代码还不曾测试过 !
+
+CPython version: `3.7.2`; pyzmq version: `18.1.0`

@@ -164,6 +164,11 @@ class TransferWithZMQPP(BaseTransfer):
     def sendFile(self):
         sock = self.ctx.socket(zmq.PUSH)
         sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        # 如果没有一次性传送完所有的文件，下次启动时接着传
+        if "inuseTransferFundCode" in self.cache.keys():
+            for mem in self.cache.smembers("inuseTransferFundCode"):
+                self.cache.smove("inuseTransferFundCode", "transferFundCode", mem)
+        
         while "transferFundCode" in self.cache.keys():
             fundCode = self.cache.spop("transferFundCode")
             if fundCode is None:
