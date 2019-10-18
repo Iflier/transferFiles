@@ -5,6 +5,8 @@ Created on: 2019.10.14
 Author: Iflier
 Modified on: 2019.10.17
 对 PUSH/PULL 连接绑定对，添加暂存正在使用的fundcode
+Modified on: 2019.10.18
+添加统计发送文件的速率
 """
 import os
 import sys
@@ -19,7 +21,7 @@ from datetime import datetime
 
 import zmq
 
-from FundTools.GeneralCrawlerTool.Base import SingletonRedis
+from GeneralCrawlerTool.Base import SingletonRedis
 
 
 class BaseTransfer(object):
@@ -27,7 +29,7 @@ class BaseTransfer(object):
         self.ip = ip
         self.port = port
         self.cache = SingletonRedis.getRedisInstance()
-        self.filepathTemp = self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "apiGot", "${filename}"))
+        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "apiGot", "${filename}"))
 
 class Transfer(BaseTransfer):
     
@@ -169,6 +171,8 @@ class TransferWithZMQPP(BaseTransfer):
             for mem in self.cache.smembers("inuseTransferFundCode"):
                 self.cache.smove("inuseTransferFundCode", "transferFundCode", mem)
         
+        startTime = time.time()
+        filesNum = self.cache.scard("transferFundCode")
         while "transferFundCode" in self.cache.keys():
             fundCode = self.cache.spop("transferFundCode")
             if fundCode is None:
@@ -185,6 +189,8 @@ class TransferWithZMQPP(BaseTransfer):
         sock.send_string(json.dumps(dict(fundcode="exit", content=""), ensure_ascii=False))
         sock.close()
         self.ctx.destroy()
+        endTime = time.time()
+        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minutes".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
     
     def recvFile(self):
         sock = self.ctx.socket(zmq.PULL)
