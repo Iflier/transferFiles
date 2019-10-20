@@ -17,19 +17,20 @@ import socket
 import struct
 import string
 import pickle
+import threading
 from datetime import datetime
 
 import zmq
 
-from GeneralCrawlerTool.Base import SingletonRedis
+from ..GeneralCrawlerTool.Base import SingletonRedis
 
 
 class BaseTransfer(object):
     def __init__(self, ip, port):
         self.ip = ip
-        self.port = port
+        self.port = port if isinstance(port, str) else str(port)
         self.cache = SingletonRedis.getRedisInstance()
-        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "apiGot", "${filename}"))
+        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "dedupApiGot", "${filename}"))
 
 class Transfer(BaseTransfer):
     
@@ -163,7 +164,7 @@ class TransferWithZMQPP(BaseTransfer):
         super(TransferWithZMQPP, self).__init__(ip, port)
         self.ctx = zmq.Context.instance()
     
-    def sendFile(self):
+    def sendFile(self, peerNumber=1):
         sock = self.ctx.socket(zmq.PUSH)
         sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
         # 如果没有一次性传送完所有的文件，下次启动时接着传
@@ -186,7 +187,8 @@ class TransferWithZMQPP(BaseTransfer):
                 fileContent = file.read()
             sock.send_string(json.dumps(dict(fundcode=fundCode, content=fileContent), ensure_ascii=False))
             self.cache.srem("inuseTransferFundCode", fundCode)
-        sock.send_string(json.dumps(dict(fundcode="exit", content=""), ensure_ascii=False))
+        for _ in range(peerNumber):
+            sock.send_string(json.dumps(dict(fundcode="exit", content=""), ensure_ascii=False))
         sock.close()
         self.ctx.destroy()
         endTime = time.time()
@@ -198,10 +200,20 @@ class TransferWithZMQPP(BaseTransfer):
         while True:
             msg = json.loads(sock.recv_string(), encoding="utf-8")
             if msg["fundcode"].lower() in ["exit", "quit"]:
+                print("[INFO] Exit ...")
                 break
             else:
                 filepath = self.filepathTemp.substitute(filename=".".join([msg["fundcode"], "json"]))
                 with open(filepath, 'w', encoding='utf-8') as file:
                     file.write(msg["content"])
         sock.close()
-        self.ctx.destroy()
+    
+    def recvFilesWithMultiThreads(self):
+        thList = list()
+        for _ in range(10):
+            thList.append(threading.Thread(target=self.recvFile, args=()))
+        for th in thList:
+            th.start()
+        for th in thList:
+            th.join()
+        self.ctx.term()
