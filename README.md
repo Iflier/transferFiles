@@ -6,4 +6,8 @@
 使用先进的消息队列`ZMQ`在机器之间复制文件  
 所有的代码还不曾测试过 !
 
+## Update on 2019.10.20
+下面是局域网内的测试片段，最慢8分多钟传完。嗯，的确比远程桌面连接下复制文件快得多。
+![image](https://github.com/Iflier/transferFiles/blob/master/fast.PNG)</br>
+
 CPython version: `3.7.2`; pyzmq version: `18.1.0`
