@@ -192,7 +192,7 @@ class TransferWithZMQPP(BaseTransfer):
         sock.close()
         self.ctx.destroy()
         endTime = time.time()
-        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minutes".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
+        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minute".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
     
     def recvFile(self):
         sock = self.ctx.socket(zmq.PULL)
