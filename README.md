@@ -7,7 +7,10 @@
 所有的代码还不曾测试过 !
 
 ## Update on 2019.10.20
-下面是局域网内的测试片段，最慢8分多钟传完。嗯，的确比远程桌面连接下复制文件快得多。</br>
+下面是局域网内的测试片段，最慢8分多钟传完。嗯，的确比远程桌面连接下复制文件快得多。  
+`PULL-PUSH` 模式，使用起来很方便，但是`PUSH` socket类型端，无法从对端获取消息是否接收成功的确认
 ![image](https://github.com/Iflier/transferFiles/blob/master/fast.PNG)</br>
 
+## Update on 2019.10.22
+添加`DEALER-REP` socket 类型，`REP` socket类型在向对端回复消息的时候会带有地址。基本上可以用来解决`PULL-PUSH`模式无法获取确认的问题了
 CPython version: `3.7.2`; pyzmq version: `18.1.0`

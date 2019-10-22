@@ -9,6 +9,7 @@ Modified on: 2019.10.18
 添加统计发送文件的速率
 """
 import os
+import re
 import sys
 import json
 import time
@@ -30,7 +31,7 @@ class BaseTransfer(object):
         self.ip = ip
         self.port = port if isinstance(port, str) else str(port)
         self.cache = SingletonRedis.getRedisInstance()
-        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "dedupApiGot", "${filename}"))
+        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "apiGot", "${filename}"))
 
 class Transfer(BaseTransfer):
     
@@ -211,6 +212,71 @@ class TransferWithZMQPP(BaseTransfer):
     def recvFilesWithMultiThreads(self):
         thList = list()
         for _ in range(10):
+            thList.append(threading.Thread(target=self.recvFile, args=()))
+        for th in thList:
+            th.start()
+        for th in thList:
+            th.join()
+        self.ctx.term()
+
+
+class TransferWithZMQDP(BaseTransfer):
+    def __init__(self, ip, port, peerNumber):
+        super(TransferWithZMQDP, self).__init__(ip, port)
+        self.peerNumber = peerNumber
+        self.ctx = zmq.Context.instance()
+    
+    def sendFile(self):
+        sock = self.ctx.socket(zmq.DEALER)
+        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        # 如果没有一次性传送完所有的文件，下次启动时接着传
+        if "inuseTransferFundCode" in self.cache.keys():
+            for mem in self.cache.smembers("inuseTransferFundCode"):
+                self.cache.smove("inuseTransferFundCode", "transferFundCode", mem)
+        
+        startTime = time.time()
+        filesNum = self.cache.scard("transferFundCode")
+        while "transferFundCode" in self.cache.keys():
+            fundCode = self.cache.spop("transferFundCode")
+            if fundCode is None:
+                continue
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
+            if not os.path.exists(filepath):
+                continue
+            fileContent = None
+            self.cache.sadd("inuseTransferFundCode", fundCode)
+            with open(filepath, 'r', encoding='utf-8') as file:
+                fileContent = file.read()
+            sock.send_multipart([fundCode.encode(encoding='utf-8'), b'', fundCode.encode(encoding='utf-8'), fileContent.encode(encoding='utf-8')])
+            finishedFundCode, _, status = list(map(lambda x: x.decode(), sock.recv_multipart()))
+            if status.lower() in ["ok",]:
+                if re.search(r"^\d+", finishedFundCode):
+                    self.cache.srem("inuseTransferFundCode", finishedFundCode)
+        for _ in range(self.peerNumber):
+            sock.send_multipart([b'0', b'', b'exit', b''])
+        sock.close()
+        self.ctx.term()
+        endTime = time.time()
+        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minute".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
+    
+    def recvFile(self):
+        sock = self.ctx.socket(zmq.REP)
+        sock.connect("tcp://{0}".format(":".join([self.ip, self.port])))
+        while True:
+            fundCode, fileContent = list(map(lambda x: x.decode(), sock.recv_multipart()))
+            if fundCode.lower() in ["exit", "quit"]:
+                print("[INFO] Exit ...")
+                break
+            else:
+                filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
+                with open(filepath, 'w', encoding='utf-8') as file:
+                    file.write(fileContent)
+                sock.send(b'ok')
+        sock.close()
+    
+    def recvFilesWithMultiThreads(self):
+        thList = list()
+        for _ in range(self.peerNumber):
             thList.append(threading.Thread(target=self.recvFile, args=()))
         for th in thList:
             th.start()
