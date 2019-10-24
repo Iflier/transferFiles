@@ -12,5 +12,6 @@
 ![image](https://github.com/Iflier/transferFiles/blob/master/fast.PNG)</br>
 
 ## Update on 2019.10.22
-添加`DEALER-REP` socket 类型，`REP` socket类型在向对端回复消息的时候会带有地址。基本上可以用来解决`PULL-PUSH`模式无法获取确认的问题了
+添加`DEALER-REP` socket 类型，`REP` socket类型在向对端回复消息的时候会带有地址。基本上可以用来解决`PULL-PUSH`模式无法获取确认的问题了  
+简单地尝试了一下`REQ-ROUTER` socket，要求最开始要由 `REQ` 对端发起。而 `REQ` 对端事先并不知道请求的文件是否存在，这就需要`REQ`在接受到消息后，对消息进行判断了  
 CPython version: `3.7.2`; pyzmq version: `18.1.0`

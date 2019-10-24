@@ -220,9 +220,9 @@ class TransferWithZMQPP(BaseTransfer):
         self.ctx.term()
 
 
-class TransferWithZMQDP(BaseTransfer):
+class TransferWithZMQREPDEALER(BaseTransfer):
     def __init__(self, ip, port, peerNumber):
-        super(TransferWithZMQDP, self).__init__(ip, port)
+        super(TransferWithZMQREPDEALER, self).__init__(ip, port)
         self.peerNumber = peerNumber
         self.ctx = zmq.Context.instance()
     
@@ -283,3 +283,41 @@ class TransferWithZMQDP(BaseTransfer):
         for th in thList:
             th.join()
         self.ctx.term()
+
+
+class TransferWithZMQREQROUTER(BaseTransfer):
+    def __init__(self, ip, port, peerNumber):
+        super(TransferWithZMQREQROUTER, self).__init__(ip, port)
+        self.peerNumber = peerNumber
+        self.ctx = zmq.Context.instance()
+    
+    def sendFile(self):
+        sock = self.ctx.socket(zmq.ROUTER)
+        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        while True:
+            address, _, fundCode = sock.recv_multipart()
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode.decode(), "json"]))
+            if not os.path.exists(filepath):
+                sock.send_multipart([address, b'', b'next'])
+                continue
+            fileContent = None
+            with open(filepath, 'r', encoding="utf-8") as file:
+                fileContent = file.read()
+            sock.send_multipart([address, b'', b'ok', fileContent.encode()])
+    
+    def recvFile(self):
+        sock = self.ctx.socket(zmq.REQ)
+        sock.connect("tcp://{0}".format(":".join([self.ip, self.port])))
+        while "transferFundCode" in self.cache.keys():
+            fundCode = self.cache.spop("transferFundCode", count=None)
+            if fundCode is None:
+                continue
+            sock.send_string(fundCode)  # 请求对端发送这个代码的文件内容
+            content = sock.recv_multipart()
+            if content[0].decode() in ["next",]:
+                continue
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
+            if content[0].decode() in ["ok",]:
+                with open(filepath, 'w', encoding='utf-8') as file:
+                    file.write(content[1].decode())
+        sock.close()
