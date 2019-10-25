@@ -292,32 +292,65 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         self.ctx = zmq.Context.instance()
     
     def sendFile(self):
-        sock = self.ctx.socket(zmq.ROUTER)
-        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        sender = self.ctx.socket(zmq.ROUTER)
+        signalPull = self.ctx.socket(zmq.PULL)
+        sender.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        signalPull.bind("tcp://{0}".format(":".join([self.ip, str(int(self.port) + 1)])))
+        poller = zmq.Poller()
+        poller.register(sender, zmq.POLLIN)
+        poller.register(signalPull, zmq.POLLIN)
         while True:
-            address, _, fundCode = sock.recv_multipart()
-            filepath = self.filepathTemp.substitute(filename=".".join([fundCode.decode(), "json"]))
-            if not os.path.exists(filepath):
-                sock.send_multipart([address, b'', b'next'])
-                continue
-            fileContent = None
-            with open(filepath, 'r', encoding="utf-8") as file:
-                fileContent = file.read()
-            sock.send_multipart([address, b'', b'ok', fileContent.encode()])
+            try:
+                socks = dict(poller.poll())
+            except KeyboardInterrupt as err:
+                print("[ERROR] {0}".format(err))
+                break
+            if sender in socks:
+                address, _, fundCode = sender.recv_multipart()
+                filepath = self.filepathTemp.substitute(filename=".".join([fundCode.decode(), "json"]))
+                if not os.path.exists(filepath):
+                    sender.send_multipart([address, b'', b'next', b''])
+                    continue
+                fileContent = None
+                with open(filepath, 'r', encoding="utf-8") as file:
+                    fileContent = file.read()
+                sender.send_multipart([address, b'', b'ok', fileContent.encode()])
+            if signalPull in socks:
+                if signalPull.recv_string().lower() in ["exit",]:
+                    self.peerNumber -= 1
+                    if not self.peerNumber:
+                        break
+        sender.close()
+        signalPull.close()
+        self.ctx.term()
     
     def recvFile(self):
-        sock = self.ctx.socket(zmq.REQ)
-        sock.connect("tcp://{0}".format(":".join([self.ip, self.port])))
+        receiver = self.ctx.socket(zmq.REQ)
+        signalPush = self.ctx.socket(zmq.PUSH)
+        receiver.connect("tcp://{0}".format(":".join([self.ip, self.port])))
+        signalPush.connect("tcp://{0}".format(":".join([self.ip, str(int(self.port + 1))])))
         while "transferFundCode" in self.cache.keys():
             fundCode = self.cache.spop("transferFundCode", count=None)
             if fundCode is None:
                 continue
-            sock.send_string(fundCode)  # 请求对端发送这个代码的文件内容
-            content = sock.recv_multipart()
-            if content[0].decode() in ["next",]:
+            receiver.send_string(fundCode)  # 请求对端发送这个代码的文件内容
+            status, content = list(map(lambda x: x.decode(), receiver.recv_multipart()))
+            if status in ["next",]:
                 continue
             filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
-            if content[0].decode() in ["ok",]:
+            if status in ["ok",]:
                 with open(filepath, 'w', encoding='utf-8') as file:
-                    file.write(content[1].decode())
-        sock.close()
+                    file.write(content)
+        signalPush.send_string("exit")
+        receiver.close()
+        signalPush.close()
+    
+    def recvFilesWithMultiThreads(self):
+        thList = list()
+        for _ in range(self.peerNumber):
+            thList.append(threading.Thread(target=self.recvFile, args=()))
+        for th in thList:
+            th.start()
+        for th in thList:
+            th.join()
+        self.ctx.term()
