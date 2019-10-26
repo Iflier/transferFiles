@@ -292,6 +292,10 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         self.ctx = zmq.Context.instance()
     
     def sendFile(self):
+        # 如果没有一次性传送完所有的文件，下次启动时接着传
+        if "inuseTransferFundCode" in self.cache.keys():
+            for mem in self.cache.smembers("inuseTransferFundCode"):
+                self.cache.smove("inuseTransferFundCode", "transferFundCode", mem)
         sender = self.ctx.socket(zmq.ROUTER)
         signalPull = self.ctx.socket(zmq.PULL)
         sender.bind("tcp://{0}".format(":".join([self.ip, self.port])))
@@ -301,7 +305,7 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         poller.register(signalPull, zmq.POLLIN)
         while True:
             try:
-                socks = dict(poller.poll())
+                socks = dict(poller.poll(timeout=150 * 1000))
             except KeyboardInterrupt as err:
                 print("[ERROR] {0}".format(err))
                 break
@@ -344,6 +348,66 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         signalPush.send_string("exit")
         receiver.close()
         signalPush.close()
+    
+    def recvFilesWithMultiThreads(self):
+        thList = list()
+        for _ in range(self.peerNumber):
+            thList.append(threading.Thread(target=self.recvFile, args=()))
+        for th in thList:
+            th.start()
+        for th in thList:
+            th.join()
+        self.ctx.term()
+
+
+class TransferWithZMQREQROUTERSimplify(BaseTransfer):
+    def __init__(self, ip, port, peerNumber):
+        super(TransferWithZMQREQROUTER, self).__init__(ip, port)
+        self.peerNumber = peerNumber
+        self.ctx = zmq.Context.instance()
+    
+    def sendFile(self):
+        sock = self.ctx.socket(zmq.ROUTER)
+        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        while True:
+            address, _, fundCode = sock.recv_multipart()
+            if re.search(r"^\d+", fundCode.decode()):
+                filepath = self.filepathTemp.substitute(filename=".".join([fundCode.decode(), "json"]))
+                if not os.path.exists(filepath):
+                    sock.send_multipart([address, b'', b'next', b''])
+                else:
+                    fileContent = None
+                    with open(filepath, 'r', encoding="utf-8") as file:
+                        fileContent = file.read()
+                    sock.send_multipart([address, b'', b'ok', fileContent.encode()])
+            elif re.search(r"^\w+", fundCode.decode()):
+                if fundCode.decode().lower() in ["exit",]:
+                    self.peerNumber -= 1
+                    if not self.peerNumber:
+                        break
+            else:
+                print("[ERROR] Sender received an unexpected message: {0}".format(fundCode.decode()))
+                break
+        sock.close()
+        self.ctx.term()
+    
+    def recvFile(self):
+        sock = self.ctx.socket(zmq.REQ)
+        sock.connect("tcp://{0}".format(":".join([self.ip, self.port])))
+        while "transferFundCode" in self.cache.keys():
+            fundCode = self.cache.spop("transferFundCode", count=None)
+            if fundCode is None:
+                continue
+            sock.send_string(fundCode)  # 请求对端发送这个代码的文件内容
+            status, content = list(map(lambda x: x.decode(), sock.recv_multipart()))
+            if status in ["next",]:
+                continue
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
+            if status in ["ok",]:
+                with open(filepath, 'w', encoding='utf-8') as file:
+                    file.write(content)
+        sock.send_string("exit")
+        sock.close()
     
     def recvFilesWithMultiThreads(self):
         thList = list()
