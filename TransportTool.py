@@ -31,7 +31,7 @@ class BaseTransfer(object):
         self.ip = ip
         self.port = port if isinstance(port, str) else str(port)
         self.cache = SingletonRedis.getRedisInstance()
-        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "apiGot", "${filename}"))
+        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "dedupApiGot", "${filename}"))
 
 class Transfer(BaseTransfer):
     
@@ -296,6 +296,8 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         if "inuseTransferFundCode" in self.cache.keys():
             for mem in self.cache.smembers("inuseTransferFundCode"):
                 self.cache.smove("inuseTransferFundCode", "transferFundCode", mem)
+        startTime = time.time()
+        filesNum = self.cache.scard("transferFundCode")
         sender = self.ctx.socket(zmq.ROUTER)
         signalPull = self.ctx.socket(zmq.PULL)
         sender.bind("tcp://{0}".format(":".join([self.ip, self.port])))
@@ -327,12 +329,14 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         sender.close()
         signalPull.close()
         self.ctx.term()
+        endTime = time.time()
+        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minute".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
     
     def recvFile(self):
         receiver = self.ctx.socket(zmq.REQ)
         signalPush = self.ctx.socket(zmq.PUSH)
         receiver.connect("tcp://{0}".format(":".join([self.ip, self.port])))
-        signalPush.connect("tcp://{0}".format(":".join([self.ip, str(int(self.port + 1))])))
+        signalPush.connect("tcp://{0}".format(":".join([self.ip, str(int(self.port) + 1)])))
         while "transferFundCode" in self.cache.keys():
             fundCode = self.cache.spop("transferFundCode", count=None)
             if fundCode is None:
