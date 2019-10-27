@@ -27,6 +27,8 @@ from ..GeneralCrawlerTool.Base import SingletonRedis
 
 
 class BaseTransfer(object):
+    """公共基类
+    """
     def __init__(self, ip, port):
         self.ip = ip
         self.port = port if isinstance(port, str) else str(port)
@@ -108,7 +110,7 @@ class Transfer(BaseTransfer):
 
 
 class TransferWithZMQ(BaseTransfer):
-    """发送一个文件需要对端来回通信 2 次。也不便于开多线程
+    """发送一个文件需要对端来回通信 2 次
     """
     def __init__(self, ip, port):
         super(TransferWithZMQ, self).__init__(ip, port)
@@ -301,6 +303,7 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         sender = self.ctx.socket(zmq.ROUTER)
         signalPull = self.ctx.socket(zmq.PULL)
         sender.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        # 用于接收对端退出的通知
         signalPull.bind("tcp://{0}".format(":".join([self.ip, str(int(self.port) + 1)])))
         poller = zmq.Poller()
         poller.register(sender, zmq.POLLIN)
@@ -349,7 +352,7 @@ class TransferWithZMQREQROUTER(BaseTransfer):
             if status in ["ok",]:
                 with open(filepath, 'w', encoding='utf-8') as file:
                     file.write(content)
-        signalPush.send_string("exit")
+        signalPush.send_string("exit")  # 通知对端可以退出了
         receiver.close()
         signalPush.close()
     
@@ -365,6 +368,8 @@ class TransferWithZMQREQROUTER(BaseTransfer):
 
 
 class TransferWithZMQREQROUTERSimplify(BaseTransfer):
+    """类似于上面的类，但是没有专门用于接收对端通知的 socket 类型。对端的退出，通过判断分隔符之后的第一个帧的内容来决定
+    """
     def __init__(self, ip, port, peerNumber):
         super(TransferWithZMQREQROUTER, self).__init__(ip, port)
         self.peerNumber = peerNumber
@@ -410,7 +415,7 @@ class TransferWithZMQREQROUTERSimplify(BaseTransfer):
             if status in ["ok",]:
                 with open(filepath, 'w', encoding='utf-8') as file:
                     file.write(content)
-        sock.send_string("exit")
+        sock.send_string("exit")  # 通知对端退出的消息
         sock.close()
     
     def recvFilesWithMultiThreads(self):
