@@ -18,4 +18,7 @@
 前一个版本，文件发送方无法知道何时退出。而最佳退出时机，由文件接收方通知最为合适。因此，添加了 `PULL-PUSH` socket 类型，用于发送/接收退出的通知  
 ## Update on 2019.10.26
 1. 更正类型转换时的一个错误。  
+## Update on 2019.11.02
+测试 `REP-DEALER` socket 对儿：
+![image](https://github.com/Iflier/transferFiles/blob/master/1.PNG)  
 CPython version: `3.7.2`; pyzmq version: `18.1.0`
