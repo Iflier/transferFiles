@@ -227,6 +227,7 @@ class TransferWithZMQREPDEALER(BaseTransfer):
         super(TransferWithZMQREPDEALER, self).__init__(ip, port)
         self.peerNumber = peerNumber
         self.ctx = zmq.Context.instance()
+        self.lock = threading.Lock()
     
     def sendFile(self):
         sock = self.ctx.socket(zmq.DEALER)
@@ -275,6 +276,9 @@ class TransferWithZMQREPDEALER(BaseTransfer):
                     file.write(fileContent)
                 sock.send(b'ok')
         sock.close()
+        with self.lock:
+            if not self.ctx.closed:
+                self.ctx.term()
     
     def recvFilesWithMultiThreads(self):
         thList = list()
@@ -284,7 +288,6 @@ class TransferWithZMQREPDEALER(BaseTransfer):
             th.start()
         for th in thList:
             th.join()
-        self.ctx.term()
 
 
 class TransferWithZMQREQROUTER(BaseTransfer):
