@@ -408,7 +408,7 @@ class TransferWithZMQDEALERROUTER(BaseTransfer):
                 file.write(content[1].decode())
         sock.send_string('exit')
         sock.close()
-        sock.term()
+        self.ctx.term()
         print("Done.")
 
 
