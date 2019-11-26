@@ -276,10 +276,7 @@ class TransferWithZMQREPDEALER(BaseTransfer):
                     file.write(fileContent)
                 sock.send(b'ok')
         sock.close()
-        with self.lock:
-            if not self.ctx.closed:
-                self.ctx.term()
-    
+
     def recvFilesWithMultiThreads(self):
         thList = list()
         for _ in range(self.peerNumber):
@@ -288,6 +285,7 @@ class TransferWithZMQREPDEALER(BaseTransfer):
             th.start()
         for th in thList:
             th.join()
+        self.ctx.term()
 
 
 class TransferWithZMQREQROUTER(BaseTransfer):
@@ -370,11 +368,55 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         self.ctx.term()
 
 
+class TransferWithZMQDEALERROUTER(BaseTransfer):
+    """使用 DEALER 和 ROUTER 分别代替 REQ 和 REP socket类型
+    """
+    def __init__(self, ip, port):
+        super(TransferWithZMQDEALERROUTER, self).__init__(ip, port)
+        self.ctx = zmq.Context.instance()
+    
+    def sendFile(self):
+        sock = self.ctx.socket(zmq.ROUTER)
+        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        while True:
+            address, fundCode = sock.recv_multipart()
+            if fundCode.decode().lower() in ["exit", "quit"]:
+                break
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode.decode(), "json"]))
+            if not os.path.exists(filepath):
+                sock.send_multipart([address, b'next'])
+                continue
+            with open(filepath, 'r', encoding='utf-8') as file:
+                sock.send_multipart([address, b'ok', file.read().encode()])
+        sock.close()
+        self.ctx.term()
+        print("Done.")
+    
+    def recvFile(self):
+        sock = self.ctx.socket(zmq.DEALER)
+        sock.connect("tcp://{0}".format(":".join([self.ip, self.port])))
+        while self.cache.scard("transferFundCode"):
+            fundCode = self.cache.spop("transferFundCode", count=None)
+            if fundCode is None:
+                continue
+            sock.send_string(fundCode)
+            content = sock.recv_multipart()
+            if content[0].decode() == "next":
+                continue
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
+            with open(filepath, "w", encoding='utf-8') as file:
+                file.write(content[1].decode())
+        sock.send_string('exit')
+        sock.close()
+        sock.term()
+        print("Done.")
+
+
 class TransferWithZMQREQROUTERSimplify(BaseTransfer):
     """类似于上面的类，但是没有专门用于接收对端通知的 socket 类型。对端的退出，通过判断分隔符之后的第一个帧的内容来决定
     """
     def __init__(self, ip, port, peerNumber):
-        super(TransferWithZMQREQROUTER, self).__init__(ip, port)
+        super(TransferWithZMQREQROUTERSimplify, self).__init__(ip, port)
         self.peerNumber = peerNumber
         self.ctx = zmq.Context.instance()
     

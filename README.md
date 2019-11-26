@@ -21,4 +21,7 @@
 ## Update on 2019.11.02
 测试 `REP-DEALER` socket 对儿：
 ![image](https://github.com/Iflier/transferFiles/blob/master/1.PNG)  
+## Update on 2019.11.26
+1. 更正一个继承了父类的子类的写法错误  
+2. 添加了`DEALER`和`ROUTER` socket 对儿的用法</br>
 CPython version: `3.7.2`; pyzmq version: `18.1.0`
