@@ -369,45 +369,65 @@ class TransferWithZMQREQROUTER(BaseTransfer):
 
 
 class TransferWithZMQDEALERROUTER(BaseTransfer):
-    """使用 DEALER 和 ROUTER 分别代替 REQ 和 REP socket类型
+    """使用 DEALER 和 ROUTER 分别代替 REQ 和 REP socket类型。
+    一个发送（读），多个接收（写），这样会快些。为了多线程的写，能够及时推出，创建了 PULL 和 PUSH socket 对儿
     """
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, peerNumber=10):
         super(TransferWithZMQDEALERROUTER, self).__init__(ip, port)
+        self.peerNumber = peerNumber  # 仅为了表示写线程个数
         self.ctx = zmq.Context.instance()
     
     def sendFile(self):
-        sock = self.ctx.socket(zmq.ROUTER)
-        sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
-        while True:
-            address, fundCode = sock.recv_multipart()
-            if fundCode.decode().lower() in ["exit", "quit"]:
-                break
-            filepath = self.filepathTemp.substitute(filename=".".join([fundCode.decode(), "json"]))
-            if not os.path.exists(filepath):
-                sock.send_multipart([address, b'next'])
-                continue
-            with open(filepath, 'r', encoding='utf-8') as file:
-                sock.send_multipart([address, b'ok', file.read().encode()])
-        sock.close()
-        self.ctx.term()
-        print("Done.")
-    
-    def recvFile(self):
-        sock = self.ctx.socket(zmq.DEALER)
-        sock.connect("tcp://{0}".format(":".join([self.ip, self.port])))
+        sockSend = self.ctx.socket(zmq.DEALER)
+        sockSignal = self.ctx.socket(zmq.PUSH)
+        sockSend.bind("tcp://{0}".format(":".join([self.ip, self.port])))
+        sockSignal.bind("tcp://{0}".format(":".join([self.ip, str(int(self.port + 1))])))
         while self.cache.scard("transferFundCode"):
             fundCode = self.cache.spop("transferFundCode", count=None)
             if fundCode is None:
                 continue
-            sock.send_string(fundCode)
-            content = sock.recv_multipart()
-            if content[0].decode() == "next":
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode.decode(), "json"]))
+            if not os.path.exists(filepath):
                 continue
-            filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
-            with open(filepath, "w", encoding='utf-8') as file:
-                file.write(content[1].decode())
-        sock.send_string('exit')
-        sock.close()
+            with open(filepath, 'r', encoding='utf-8') as file:
+                sockSend.send_multipart([fundCode.encode(), file.read().encode()])
+            sockSend.recv_multipart()
+        sockSignal.send_string("exit")
+        sockSend.close()
+        sockSignal.close()
+        self.ctx.term()
+        print("Done.")
+    
+    def recvFile(self):
+        sockRecv = self.ctx.socket(zmq.ROUTER)
+        sockSignal = self.ctx.socket(zmq.PULL)
+        sockRecv.connect("tcp://{0}".format(":".join([self.ip, self.port])))
+        sockSignal.connect("tcp://{0}".format(":".join([self.ip, str(int(self.port) + 1)])))
+        poller = zmq.Poller()
+        poller.register(sockRecv, zmq.POLLIN)
+        poller.register(sockSignal, zmq.POLLIN)
+        while True:
+            socks = dict(poller.poll())
+            if socks.get(sockRecv) == zmq.POLLIN:
+                addr, fundCode, content = sockRecv.recv_multipart()
+                filepath = self.filepathTemp.substitute(filename=".".join([fundCode.decode(), "json"]))
+                with open(filepath, 'w', encoding='utf-8') as file:
+                    file.write(content.decode())
+                sockRecv.send_multipart([addr, b'ok'])
+            if socks.get(sockSignal) == zmq.POLLIN:
+                print("Exit ...")
+                break
+        sockRecv.close()
+        sockSignal.close()
+    
+    def recvFilesWithMultiThreads(self):
+        thList = list()
+        for _ in range(self.peerNumber):
+            thList.append(threading.Thread(target=self.recvFile, args=()))
+        for th in thList:
+            th.start()
+        for th in thList:
+            th.join()
         self.ctx.term()
         print("Done.")
 
