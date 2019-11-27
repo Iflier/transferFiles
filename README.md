@@ -8,7 +8,7 @@
 
 ## Update on 2019.10.20
 下面是局域网内的测试片段，最慢 `8` 分多钟传完。嗯，的确比远程桌面连接下复制文件快得多。  
-`PULL-PUSH` 模式，使用起来很方便，但是`PUSH` socket类型端，无法从对端获取消息是否接收成功的确认
+`PULL-PUSH` 模式，使用起来很方便，但是`PUSH` socket类型端，无法从对端获取消息是否接收成功的确认</br>
 ![image](https://github.com/Iflier/transferFiles/blob/master/fast.PNG)</br>
 
 ## Update on 2019.10.22
@@ -19,7 +19,7 @@
 ## Update on 2019.10.26
 1. 更正类型转换时的一个错误。  
 ## Update on 2019.11.02
-测试 `REP-DEALER` socket 对儿：
+测试 `REP-DEALER` socket 对儿：</br>
 ![image](https://github.com/Iflier/transferFiles/blob/master/1.PNG)  
 ## Update on 2019.11.26
 1. 更正一个继承了父类的子类的写法错误  

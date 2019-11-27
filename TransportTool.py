@@ -115,6 +115,7 @@ class TransferWithZMQ(BaseTransfer):
     def __init__(self, ip, port):
         super(TransferWithZMQ, self).__init__(ip, port)
         self.ctx = zmq.Context.instance()
+        print("[INFO] Test REQ-REP socket pair ...")
     
     def sendFile(self):
         sock = self.ctx.socket(zmq.REQ)
@@ -166,6 +167,7 @@ class TransferWithZMQPP(BaseTransfer):
     def __init__(self, ip, port):
         super(TransferWithZMQPP, self).__init__(ip, port)
         self.ctx = zmq.Context.instance()
+        print("[INFO] Test PULL-PUSH socket bpair ...")
     
     def sendFile(self, peerNumber=1):
         sock = self.ctx.socket(zmq.PUSH)
@@ -227,7 +229,7 @@ class TransferWithZMQREPDEALER(BaseTransfer):
         super(TransferWithZMQREPDEALER, self).__init__(ip, port)
         self.peerNumber = peerNumber
         self.ctx = zmq.Context.instance()
-        self.lock = threading.Lock()
+        print("[INFO] Test REP-DEALER socket pair ...")
     
     def sendFile(self):
         sock = self.ctx.socket(zmq.DEALER)
@@ -293,6 +295,7 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         super(TransferWithZMQREQROUTER, self).__init__(ip, port)
         self.peerNumber = peerNumber
         self.ctx = zmq.Context.instance()
+        print("[INFO] Test REQ-ROUTER socket pair ...")
     
     def sendFile(self):
         # 如果没有一次性传送完所有的文件，下次启动时接着传
@@ -370,12 +373,14 @@ class TransferWithZMQREQROUTER(BaseTransfer):
 
 class TransferWithZMQDEALERROUTER(BaseTransfer):
     """使用 DEALER 和 ROUTER 分别代替 REQ 和 REP socket类型。
-    一个发送（读），多个接收（写），这样会快些。为了多线程的写，能够及时推出，创建了 PULL 和 PUSH socket 对儿
+    一个发送（读），多个接收（写），这样会快些。为了多线程的写，能够及时退出，创建了 PULL 和 PUSH socket 对儿
+    这种一读多写，仍然比不上 PULL-PUSH 模式的速度，因为 DEALER 端在发送完之后，等待来自对端的回复。这个等待过程是阻塞的，无法发送新的数据
     """
     def __init__(self, ip, port, peerNumber=10):
         super(TransferWithZMQDEALERROUTER, self).__init__(ip, port)
         self.peerNumber = peerNumber  # 仅为了表示写线程个数
         self.ctx = zmq.Context.instance()
+        print("[INFO] Test DEALER-ROUTER socket pair ...")
     
     def sendFile(self):
         sockSend = self.ctx.socket(zmq.DEALER)
@@ -439,6 +444,7 @@ class TransferWithZMQREQROUTERSimplify(BaseTransfer):
         super(TransferWithZMQREQROUTERSimplify, self).__init__(ip, port)
         self.peerNumber = peerNumber
         self.ctx = zmq.Context.instance()
+        print("[INFO] Test simplify REQ-ROUTER socket pair ...")
     
     def sendFile(self):
         sock = self.ctx.socket(zmq.ROUTER)
