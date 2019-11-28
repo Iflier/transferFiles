@@ -109,11 +109,11 @@ class Transfer(BaseTransfer):
         print("[INFO] Complete at {0}".format(datetime.now().strftime("%c")))
 
 
-class TransferWithZMQ(BaseTransfer):
-    """发送一个文件需要对端来回通信 2 次
+class TransferWithZMQREQREP(BaseTransfer):
+    """发送一次文件仅收发各一次
     """
     def __init__(self, ip, port):
-        super(TransferWithZMQ, self).__init__(ip, port)
+        super(TransferWithZMQREQREP, self).__init__(ip, port)
         self.ctx = zmq.Context.instance()
         print("[INFO] Test REQ-REP socket pair ...")
     
@@ -127,18 +127,17 @@ class TransferWithZMQ(BaseTransfer):
             filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
             if not os.path.exists(filepath):
                 continue
-            fileContent = None
-            sock.send_string("next,{0}".format(fundCode))  # 第一次发送：发送下一个文件的名称
             self.cache.sadd("inuseTransferFundCode", fundCode)
+            sendContent = dict()
+            sendContent["filename"] = fundCode
+            with open(filepath, 'r', encoding="utf-8") as file:
+                sendContent["content"] = file.read()
+            sock.send_pyobj(pickle.dumps(sendContent))
             if sock.recv_string().lower() == "ok":
-                with open(filepath, 'r', encoding="utf-8") as file:
-                    fileContent = file.read()
-                sock.send_pyobj(pickle.dumps(fileContent))  # 第二次发送：发送关于下一个文件的内容
-                sock.recv_string()
                 self.cache.srem("inuseTransferFundCode", fundCode)
             else:
                 break
-        sock.send_string("exit,0")  # 通知对端退出
+        sock.send_pyobj(pickle.dumps(dict(filename='exit', cotent=None)))
         sock.close()
         self.ctx.destroy()
         
@@ -147,15 +146,12 @@ class TransferWithZMQ(BaseTransfer):
         sock = self.ctx.socket(zmq.REP)
         sock.connect("tcp://{0}".format(":".join([self.ip, self.port])))
         while True:
-            infoStr = sock.recv_string().lower()
-            info, fundCode = infoStr.split(',')
-            if info == "next":
+            receivedContent = pickle.loads(sock.recv_pyobj())
+            if re.search(r"^\d+", receivedContent['filename'], re.I):
                 sock.send_string("ok")
-                filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
-                pickledContent = sock.recv_pyobj()
+                filepath = self.filepathTemp.substitute(filename=".".join([receivedContent['filename'], "json"]))
                 with open(filepath, 'w', encoding='utf-8') as file:
-                    file.write(pickle.loads(pickledContent))
-                sock.send_string("ok")
+                    file.write(receivedContent['content'])
             else:
                 break
         sock.close()
