@@ -41,7 +41,7 @@ def measuerSpeed(totalNum):
         @functools.wraps(func)
         def inner(self, *args, **kwargs):
             stratTime = time.time()
-            func(*args, **kwargss)
+            func(*args, **kwargs)
             print("[INFO] Transfer rate: {0} / s".format(round(totalNum / (time.time() - stratTime), 2)))
         return inner
     return outer
