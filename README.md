@@ -26,4 +26,6 @@
 2. 添加了`DEALER`和`ROUTER` socket 对儿的用法</br>
 ## Update on 2019.11.28
 给各个类的发送函数加个装饰器，用以统计发送速率</br>
+## Update on 2019.12.01
+错误地使用 `PULL-PUSH` socket 对儿，这种组合模式，虽是一发多收，但是每一条消息，只能被某一个对端接收。修改为 `SUB-PUB` socket组合
 CPython version: `3.7.2`; pyzmq version: `18.1.0`

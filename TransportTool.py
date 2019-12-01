@@ -34,17 +34,8 @@ class BaseTransfer(object):
         self.ip = ip
         self.port = port if isinstance(port, str) else str(port)
         self.cache = SingletonRedis.getRedisInstance()
-        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "dedupApiGot", "${filename}"))
+        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "apiGot", "${filename}"))
 
-def measuerSpeed(totalNum):
-    def outer(func):
-        @functools.wraps(func)
-        def inner(self, *args, **kwargs):
-            stratTime = time.time()
-            func(*args, **kwargs)
-            print("[INFO] Transfer rate: {0} / s".format(round(totalNum / (time.time() - stratTime), 2)))
-        return inner
-    return outer
 
 class Transfer(BaseTransfer):
     
@@ -55,8 +46,9 @@ class Transfer(BaseTransfer):
         super(Transfer, self).__init__(ip, port)
         self.fileInfoStruct = struct.Struct(self.StructFormat)
     
-    @measuerSpeed(self.cache.scard("transferFundCode"))
     def sendFile(self):
+        stratTime = time.time()
+        totalNum = self.cache.scard("transferFundCode")
         print("[INFO] Sending ...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(150)
@@ -91,6 +83,7 @@ class Transfer(BaseTransfer):
         conn.send(self.fileInfoStruct.pack("exit", 0))
         conn.close()
         sock.close()
+        print("[INFO] Transfer rate: {0} / s".format(round(totalNum / (time.time() - stratTime), 2)))
     
     def recvFile(self):
         print("[INFO] Start at {0}".format(datetime.now().strftime("%c")))
@@ -125,8 +118,9 @@ class TransferWithZMQREQREP(BaseTransfer):
         self.ctx = zmq.Context.instance()
         print("[INFO] Test REQ-REP socket pair ...")
     
-    @measuerSpeed
     def sendFile(self):
+        startTime = time.time()
+        filesNum = self.cache.scard("transferFundCode")
         sock = self.ctx.socket(zmq.REQ)
         sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
         while "transferFundCode" in self.cache.keys():
@@ -149,6 +143,8 @@ class TransferWithZMQREQREP(BaseTransfer):
         sock.send_pyobj(pickle.dumps(dict(filename='exit', cotent=None)))
         sock.close()
         self.ctx.destroy()
+        endTime = time.time()
+        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minute".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
 
     def recvFile(self):
         sock = self.ctx.socket(zmq.REP)
@@ -173,8 +169,9 @@ class TransferWithZMQPP(BaseTransfer):
         self.ctx = zmq.Context.instance()
         print("[INFO] Test PULL-PUSH socket bpair ...")
     
-    @measuerSpeed(self.cache.scard("transferFundCode"))
     def sendFile(self, peerNumber=1):
+        startTime = time.time()
+        filesNum = self.cache.scard("transferFundCode")
         sock = self.ctx.socket(zmq.PUSH)
         sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
         # 如果没有一次性传送完所有的文件，下次启动时接着传
@@ -182,7 +179,6 @@ class TransferWithZMQPP(BaseTransfer):
             for mem in self.cache.smembers("inuseTransferFundCode"):
                 self.cache.smove("inuseTransferFundCode", "transferFundCode", mem)
         
-        filesNum = self.cache.scard("transferFundCode")
         while "transferFundCode" in self.cache.keys():
             fundCode = self.cache.spop("transferFundCode")
             if fundCode is None:
@@ -200,6 +196,8 @@ class TransferWithZMQPP(BaseTransfer):
             sock.send_string(json.dumps(dict(fundcode="exit", content=""), ensure_ascii=False))
         sock.close()
         self.ctx.destroy()
+        endTime = time.time()
+        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minute".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
 
     def recvFile(self):
         sock = self.ctx.socket(zmq.PULL)
@@ -233,8 +231,9 @@ class TransferWithZMQREPDEALER(BaseTransfer):
         self.ctx = zmq.Context.instance()
         print("[INFO] Test REP-DEALER socket pair ...")
     
-    @measuerSpeed(self.cache.scard("transferFundCode"))
     def sendFile(self):
+        startTime = time.time()
+        filesNum = self.cache.scard("transferFundCode")
         sock = self.ctx.socket(zmq.DEALER)
         sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
         # 如果没有一次性传送完所有的文件，下次启动时接着传
@@ -300,8 +299,9 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         self.ctx = zmq.Context.instance()
         print("[INFO] Test REQ-ROUTER socket pair ...")
     
-    @measuerSpeed(self.cache.scard("transferFundCode"))
     def sendFile(self):
+        startTime = time.time()
+        filesNum = self.cache.scard("transferFundCode")
         # 如果没有一次性传送完所有的文件，下次启动时接着传
         if "inuseTransferFundCode" in self.cache.keys():
             for mem in self.cache.smembers("inuseTransferFundCode"):
@@ -338,6 +338,8 @@ class TransferWithZMQREQROUTER(BaseTransfer):
         sender.close()
         signalPull.close()
         self.ctx.term()
+        endTime = time.time()
+        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minute".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
 
     def recvFile(self):
         receiver = self.ctx.socket(zmq.REQ)
@@ -382,33 +384,37 @@ class TransferWithZMQDEALERROUTER(BaseTransfer):
         self.ctx = zmq.Context.instance()
         print("[INFO] Test DEALER-ROUTER socket pair ...")
     
-    @measuerSpeed(self.cache.scard("transferFundCode"))
     def sendFile(self):
+        startTime = time.time()
+        filesNum = self.cache.scard("transferFundCode")
         sockSend = self.ctx.socket(zmq.DEALER)
-        sockSignal = self.ctx.socket(zmq.PUSH)
+        sockSignal = self.ctx.socket(zmq.PUB)
         sockSend.bind("tcp://{0}".format(":".join([self.ip, self.port])))
-        sockSignal.bind("tcp://{0}".format(":".join([self.ip, str(int(self.port + 1))])))
+        sockSignal.bind("tcp://{0}".format(":".join([self.ip, str(int(self.port) + 1)])))
         while self.cache.scard("transferFundCode"):
             fundCode = self.cache.spop("transferFundCode", count=None)
             if fundCode is None:
                 continue
-            filepath = self.filepathTemp.substitute(filename=".".join([fundCode.decode(), "json"]))
+            filepath = self.filepathTemp.substitute(filename=".".join([fundCode, "json"]))
             if not os.path.exists(filepath):
                 continue
             with open(filepath, 'r', encoding='utf-8') as file:
                 sockSend.send_multipart([fundCode.encode(), file.read().encode()])
             sockSend.recv_multipart()
-        sockSignal.send_string("exit")
+        sockSignal.send_multipart([b'signal', b'exit'])
         sockSend.close()
         sockSignal.close()
         self.ctx.term()
+        endTime = time.time()
+        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minute".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
         print("Done.")
     
     def recvFile(self):
         sockRecv = self.ctx.socket(zmq.ROUTER)
-        sockSignal = self.ctx.socket(zmq.PULL)
+        sockSignal = self.ctx.socket(zmq.SUB)
         sockRecv.connect("tcp://{0}".format(":".join([self.ip, self.port])))
         sockSignal.connect("tcp://{0}".format(":".join([self.ip, str(int(self.port) + 1)])))
+        sockSignal.set_string(zmq.SUBSCRIBE, 'signal')
         poller = zmq.Poller()
         poller.register(sockRecv, zmq.POLLIN)
         poller.register(sockSignal, zmq.POLLIN)
@@ -421,8 +427,9 @@ class TransferWithZMQDEALERROUTER(BaseTransfer):
                     file.write(content.decode())
                 sockRecv.send_multipart([addr, b'ok'])
             if socks.get(sockSignal) == zmq.POLLIN:
-                print("Exit ...")
-                break
+                if sockSignal.recv_string().lower() in ["exit", "quit"]:
+                    print("Exit ...")
+                    break
         sockRecv.close()
         sockSignal.close()
     
@@ -447,8 +454,9 @@ class TransferWithZMQREQROUTERSimplify(BaseTransfer):
         self.ctx = zmq.Context.instance()
         print("[INFO] Test simplify REQ-ROUTER socket pair ...")
     
-    @measuerSpeed(self.cache.scard("transferFundCode"))
     def sendFile(self):
+        startTime = time.time()
+        filesNum = self.cache.scard("transferFundCode")
         sock = self.ctx.socket(zmq.ROUTER)
         sock.bind("tcp://{0}".format(":".join([self.ip, self.port])))
         while True:
@@ -472,6 +480,8 @@ class TransferWithZMQREQROUTERSimplify(BaseTransfer):
                 break
         sock.close()
         self.ctx.term()
+        endTime = time.time()
+        print("[INFO] Totally, use {0:^9.2f} seconds, average transfer speed: {1} files / minute".format(endTime - startTime, 0 if filesNum == 0 else round(filesNum / ((endTime - startTime) / 60), 0)))
     
     def recvFile(self):
         sock = self.ctx.socket(zmq.REQ)
