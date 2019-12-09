@@ -34,7 +34,7 @@ class BaseTransfer(object):
         self.ip = ip
         self.port = port if isinstance(port, str) else str(port)
         self.cache = SingletonRedis.getRedisInstance()
-        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "apiGot", "${filename}"))
+        self.filepathTemp = string.Template(os.path.join(os.getcwd(), "Fund", "dedupApiGot", "${filename}"))
 
 
 class Transfer(BaseTransfer):
@@ -378,9 +378,9 @@ class TransferWithZMQDEALERROUTER(BaseTransfer):
     一个发送（读），多个接收（写），这样会快些。为了多线程的写，能够及时退出，创建了 PULL 和 PUSH socket 对儿
     这种一读多写，仍然比不上 PULL-PUSH 模式的速度，因为 DEALER 端在发送完之后，等待来自对端的回复。这个等待过程是阻塞的，无法发送新的数据
     """
-    def __init__(self, ip, port, peerNumber=10):
+    def __init__(self, ip, port, peerNumber=None):
         super(TransferWithZMQDEALERROUTER, self).__init__(ip, port)
-        self.peerNumber = peerNumber  # 仅为了表示写线程个数
+        self.peerNumber = peerNumber  # 仅为了于其他组合模式保持兼容，没有实际意义
         self.ctx = zmq.Context.instance()
         print("[INFO] Test DEALER-ROUTER socket pair ...")
     
